@@ -1,0 +1,16 @@
+.build/
+Debug/
+Release/
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.o
+*.d
+*.s
+*.mkd
+*.log
+.metadata/
+.cproject
+.settings/
