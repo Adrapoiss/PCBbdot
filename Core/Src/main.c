@@ -21,9 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "lis3mdl.h"
-#include "stdio.h"
-#include "custom_bus.h"
+#include "lis3mdl.h" //draiverid
+#include "stdio.h" //standardteek
+#include "custom_bus.h" //spi init
 #include "stm32l4xx_hal_spi.h"
 /* USER CODE END Includes */
 
@@ -45,26 +45,28 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-int32_t magX = 0;
+int32_t magX = 0; //Live expression muutujad silumiseks
 int32_t magY = 0;
 int32_t magZ = 0;
 
 
-uint16_t heartbeat = 0;
+uint16_t heartbeat = 0; //peamiselt kasutust saav, eri väärtused annavad siludes teada kus programmi töö katkes
 uint16_t read_status = 0;
-LIS3MDL_Object_t lis3mdl;
+
+LIS3MDL_Object_t lis3mdl; //magnetomeetri objekt
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
-void LIS3MDL_CS_Select(void);
+void LIS3MDL_CS_Select(void); //CS signaalikontroll
 void LIS3MDL_CS_Deselect(void);
-int __io_putchar(int ch);
+int __io_putchar(int ch); //oli UARTI jaoks, pragu iganenud
+
 void Read_Magnetometer(void);
-int32_t LIS3MDL_DummyInit(void);
-int32_t LIS3MDL_DummyDeInit(void);
+int32_t LIS3MDL_DummyInit(void); //IO bus registreerimise workaround
+int32_t LIS3MDL_DummyDeInit(void);//vahepeal ei sobinud init ja deinit liikmete NULL deklaratsioon
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -86,8 +88,8 @@ void LIS3MDL_CS_Deselect(void) {
 }
 
 int32_t Write_LIS3MDL(void *handle, uint8_t reg, uint8_t *data, uint16_t len) {
-    SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)handle; // Correct cast
-    reg |= 0x40; // Multi-write bit
+    SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)handle; //kuna handle tekitatakse teises failis peab castima nii
+    reg |= 0x40; // mitmebaidine kirjutamine
     LIS3MDL_CS_Select();
     HAL_SPI_Transmit(hspi, &reg, 1, HAL_MAX_DELAY);
     HAL_SPI_Transmit(hspi, data, len, HAL_MAX_DELAY);
@@ -96,8 +98,8 @@ int32_t Write_LIS3MDL(void *handle, uint8_t reg, uint8_t *data, uint16_t len) {
 }
 
 int32_t Read_LIS3MDL(void *handle, uint8_t reg, uint8_t *data, uint16_t len) {
-    SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)handle; // Correct cast
-    reg |= 0x80 | 0x40; // Multi-read bit
+    SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)handle;
+    reg |= 0x80 | 0x40; //mitmebaidine lugemine
     LIS3MDL_CS_Select();
     HAL_SPI_Transmit(hspi, &reg, 1, HAL_MAX_DELAY);
     HAL_SPI_Receive(hspi, data, len, HAL_MAX_DELAY);
@@ -105,12 +107,12 @@ int32_t Read_LIS3MDL(void *handle, uint8_t reg, uint8_t *data, uint16_t len) {
     return LIS3MDL_OK;
 }
 
-void Read_Magnetometer(void) {
+void Read_Magnetometer(void) { //ei ole praegu kasutusel
     LIS3MDL_Axes_t axes;
     if (LIS3MDL_MAG_GetAxes(&lis3mdl, &axes) == LIS3MDL_OK) {
         printf("X: %ld, Y: %ld, Z: %ld\r\n", axes.x, axes.y, axes.z);
     } else {
-        printf("Failed to read magnetometer data\r\n");
+        read_status = 1;
     }
 }
 /* USER CODE END 0 */
@@ -147,7 +149,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   BSP_SPI1_Init();
   //Debug muutujad
-  uint8_t id;              // WHO_AM_I
+  uint8_t id;              // WHO_AM_I väärtuse salvestamiseks live expressionina lugeda ei õnnestunud aga kuni sensor töötab ei ole vajalik
   uint8_t ctrl_reg1_value;
   printf("----------Starting SPI Magnetometer on SPI1------------\r\n");
 
@@ -158,13 +160,13 @@ int main(void)
   io_local.ReadReg = (LIS3MDL_ReadReg_Func)Read_LIS3MDL;
   io_local.GetTick = (LIS3MDL_GetTick_Func)HAL_GetTick;
   io_local.Delay = HAL_Delay;
-  io_local.Init = LIS3MDL_DummyInit; //Suvalised peibutisfunktsioonid, ei tohiks muuta sensori toimimist
+  io_local.Init = LIS3MDL_DummyInit; //Suvalised "peibutis"funktsioonid, ei tohiks muuta sensori toimimist
   io_local.DeInit = LIS3MDL_DummyDeInit;// kuid vahepeal oli probleeme IO busi registreerimisega
 
-  lis3mdl.IO = io_local; // Assign the local io struct
+  lis3mdl.IO = io_local; //io structi külge kirjutamine
 
   if (LIS3MDL_RegisterBusIO(&lis3mdl, &io_local) != LIS3MDL_OK) {
-	  heartbeat = 1; // Error in registering bus I/O
+	  heartbeat = 1; // Bus Io regamine ei õnnestunud
 	  Error_Handler();
   }
 
@@ -173,9 +175,9 @@ int main(void)
   lis3mdl.Ctx.read_reg = Read_LIS3MDL;
   lis3mdl.Ctx.mdelay = HAL_Delay;
 
-  // Attempt WHO_AM_I read after successful registration
+  //registri lugemise teist
   if (LIS3MDL_ReadID(&lis3mdl, &id) == LIS3MDL_OK) {
-	  printf("WHO_AM_I: 0x%02X\r\n", id);
+	  printf("WHO_AM_I: 0x%02X\r\n", id);//ei kuvata praegu kuskil
 	  if (id != LIS3MDL_ID) {
 		  heartbeat = 3;
 		  Error_Handler();
@@ -206,7 +208,7 @@ int main(void)
 		Error_Handler();
 	}
 
-	ctrl_reg1_value |= 0x80; // Set TEMP_EN bit
+	ctrl_reg1_value |= 0x80; //temp_en biti seadistus, praegu pole vaja sest ei kasuta temp sensorit
 	if (LIS3MDL_Write_Reg(&lis3mdl, LIS3MDL_CTRL_REG1, ctrl_reg1_value) != LIS3MDL_OK) {
 		heartbeat=10;
 		Error_Handler();
@@ -227,6 +229,10 @@ int main(void)
 	while (1)
 	{
 		HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_RESET); //kõik viigud madalaks enne uut mõõtmist
+		HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOA, HB_RIN_Pin, GPIO_PIN_RESET);
 		if (lis3mdl_magnetic_raw_get(&lis3mdl.Ctx, mag_raw.i16bit) == LIS3MDL_OK) {
 			mag.x = (int32_t)((int16_t)mag_raw.i16bit[0]);
 			mag.y = (int32_t)((int16_t)mag_raw.i16bit[1]);
@@ -240,17 +246,13 @@ int main(void)
 			magY = mag.y; //live expressionis vaatamiseks muutujad
 			magZ = mag.z;
 
-			HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_RESET); //kõik madalaks enne uut
-			HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_RESET);
-			HAL_GPIO_WritePin(GPIOA, HB_RIN_Pin, GPIO_PIN_RESET);
 
 			if(measurement != 0){ //esimese mõõtmise korral ei tehta midagi
 
 				float b_dot_x = mag.x - eelmine_b_x;
 				eelmine_b_x = mag.x;
-				if(b_dot_x > 5 || b_dot_x < -5){ //kui muut on väga väike ei jää algoritm pendeldama
-					//HB_FIN ja HB_RIN on H-silla vastavad viigud, mis võivad praegu valet pidi olla
+				if(b_dot_x > 5 || b_dot_x < -5){ //kui muut on väga väike ei jää algoritm pendeldama, peab katsetama kuhu maani on mõistlik
+					//HB_FIN ja HB_RIN on H-silla vastavad viigud, mis võivad praegu valet pidi olla.
 					if (b_dot_x > 0) {
 						HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_SET);
 						HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_SET);
@@ -264,10 +266,11 @@ int main(void)
 
 		  }
 		  else {
-			  HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_SET); //lugemist ei toimunud läheb punane led põlema
+			  HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_SET); //lugemist ei toimunud läheb punane led põlema.
 		  }
 
-	  HAL_Delay((uint32_t)(1000.0f / odr));
+	  HAL_Delay((uint32_t)(1000.0f / odr)); //viivitus ODR põhjal, saaks muuta sensori lugema teatud Hz peal kui vaja, aga
+	  	  	  	  	  	  	  	  	  	  	  //näen et mõistlikum on teha ajaarvestamist koodisiseselt
 	  heartbeat++; //debug muutuja
     /* USER CODE END WHILE */
 
