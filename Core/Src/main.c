@@ -48,6 +48,7 @@
 int32_t magX = 0; //Live expression muutujad silumiseks
 int32_t magY = 0;
 int32_t magZ = 0;
+float b_dot_kesk = 0;
 
 
 uint16_t heartbeat = 0; //peamiselt kasutust saav, eri väärtused annavad siludes teada kus programmi töö katkes
@@ -71,7 +72,7 @@ int32_t LIS3MDL_DummyDeInit(void);//vahepeal ei sobinud init ja deinit liikmete 
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int32_t LIS3MDL_DummyInit(void) {
+int32_t LIS3MDL_DummyInit(void) { //kaks antud funktsiooni tagastavad lihtsalt veakoodita väljundi
     return LIS3MDL_OK;
 }
 
@@ -80,7 +81,7 @@ int32_t LIS3MDL_DummyDeInit(void) {
 }
 
 void LIS3MDL_CS_Select(void) {
-    HAL_GPIO_WritePin(LIS3MDL_CS_GPIO_Port, LIS3MDLTR_CS_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LIS3MDL_CS_GPIO_Port, LIS3MDLTR_CS_Pin, GPIO_PIN_RESET); //CS signaali juhtimisefunktsioonid
 }
 
 void LIS3MDL_CS_Deselect(void) {
@@ -107,7 +108,7 @@ int32_t Read_LIS3MDL(void *handle, uint8_t reg, uint8_t *data, uint16_t len) {
     return LIS3MDL_OK;
 }
 
-void Read_Magnetometer(void) { //ei ole praegu kasutusel
+void Read_Magnetometer(void) { //ei ole praegu kasutusel, UART-i läbi kuvamiseks mugav.
     LIS3MDL_Axes_t axes;
     if (LIS3MDL_MAG_GetAxes(&lis3mdl, &axes) == LIS3MDL_OK) {
         printf("X: %ld, Y: %ld, Z: %ld\r\n", axes.x, axes.y, axes.z);
@@ -223,6 +224,19 @@ int main(void)
 	float odr;                 // Output data rate
 	float eelmine_b_x;         // Eelmise mõõtmise X telje väärtus
 	float measurement = 0;		//mõõtmise loendur
+	/*int32_t magX_history[1000];
+	uint16_t reading_index = 0;
+	uint32_t log_interval = 3;			//logimismuutujad, pole alati kasutusel seega warningute jaoks välja kommenteeritud
+	volatile uint32_t start_time = 0;
+	volatile uint32_t end_time = 0;
+	volatile uint8_t timer_started = 0;*/
+
+	uint32_t measurement_counter = 0;
+	int16_t moving_avg_window_size = 25;
+	float magX_buffer[25];				//liikuva keskmise arvutuse muutujad
+	uint16_t buffer_index = 0;
+	float average_b_dot_x = 0;
+	uint8_t buffer_full = 0;
 
 	LIS3MDL_MAG_GetOutputDataRate(&lis3mdl, &odr);
 
@@ -233,6 +247,8 @@ int main(void)
 		HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(GPIOA, HB_RIN_Pin, GPIO_PIN_RESET);
+		HAL_Delay(20);						//viivitus et magnetväändur oleks voolust tühjaks jooksnud
+
 		if (lis3mdl_magnetic_raw_get(&lis3mdl.Ctx, mag_raw.i16bit) == LIS3MDL_OK) {
 			mag.x = (int32_t)((int16_t)mag_raw.i16bit[0]);
 			mag.y = (int32_t)((int16_t)mag_raw.i16bit[1]);
@@ -247,16 +263,60 @@ int main(void)
 			magZ = mag.z;
 
 
-			if(measurement != 0){ //esimese mõõtmise korral ei tehta midagi
+			/*if (!timer_started) {
+			        start_time = HAL_GetTick(); //Timer andmekogumise ajastamiseks
+			        timer_started = 1;
 
+			}
+			if (measurement_counter % log_interval == 0 && reading_index < 1000) { //logimine
+			        magX_history[reading_index++] = magX;
+			}
+			if (reading_index >= 1000) {
+				end_time = HAL_GetTick();
+			        break;
+			}*/
+			/*for (heartbeat = 0; heartbeat < 90000; heartbeat++){ //TEST: Magnetväändurit läbib pidevalt vool ühes suunas
+				HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_SET);
+				HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_RESET); //kõik viigud madalaks enne uut mõõtmist
+				HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_RESET);
+				if (heartbeat % 9 == 0) {
+					HAL_GPIO_WritePin(GPIOB, LED_ERR_Pin, GPIO_PIN_SET); // Toggle ERR LED every 2 counts
+				}
+				if (heartbeat % 3 == 0) {
+					HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_SET); // Toggle DB1 LED every 3 counts
+				}
+				if (heartbeat % 5 == 0) {
+					HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_SET); // Toggle DB2 LED every 5 counts
+				}
+				HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_SET);
+				HAL_Delay(400);
+			}*/
+			measurement_counter++;
+			if(measurement > 1){ //tehakse arvutusi alates teisest mõõtmisest
 				float b_dot_x = mag.x - eelmine_b_x;
 				eelmine_b_x = mag.x;
-				if(b_dot_x > 5 || b_dot_x < -5){ //kui muut on väga väike ei jää algoritm pendeldama, peab katsetama kuhu maani on mõistlik
-					//HB_FIN ja HB_RIN on H-silla vastavad viigud, mis võivad praegu valet pidi olla.
-					if (b_dot_x > 0) {
+
+				//Liikuva keskmise arvutus
+				magX_buffer[buffer_index] = b_dot_x;
+				buffer_index = (buffer_index + 1) % moving_avg_window_size;
+
+				//Kontroll kas puhver on täidetud
+				if (measurement >= moving_avg_window_size + 1) { //Kas 25 liikmeline keskmise arvutuse massiiv on täis
+					buffer_full = 1;
+					float sum = 0;	//kui hakkame massiivi liikmeid üle kirjutama tuleb iga kord uus 25 liikme summa arvutada seega see läheb nulli
+					for (int i = 0; i < moving_avg_window_size; i++) {
+						sum += magX_buffer[i]; //summaarvutus
+					}
+					average_b_dot_x = sum / moving_avg_window_size;
+					b_dot_kesk = average_b_dot_x; //live expressioni muutujasse kirjutamine
+				}
+				if(buffer_full && (average_b_dot_x > 1 || average_b_dot_x < -1)){
+					//HB_FIN ja HB_RIN on H-silla vastavad viigud.
+					if (average_b_dot_x > 0) {
 						HAL_GPIO_WritePin(GPIOB, LED_DB2_Pin, GPIO_PIN_SET);
 						HAL_GPIO_WritePin(GPIOB, HB_FIN_Pin, GPIO_PIN_SET);
-					} else if (b_dot_x < 0) {
+					} else if (average_b_dot_x < 0) {
 						HAL_GPIO_WritePin(GPIOB, LED_DB1_Pin, GPIO_PIN_SET);
 						HAL_GPIO_WritePin(GPIOA, HB_RIN_Pin, GPIO_PIN_SET);
 					}
